@@ -39,80 +39,104 @@ if st.button("🚀 開始生成驗收文件", type="primary"):
         st.error("請上傳 Word 空白範本！")
     else:
         try:
-            # 讀取 Excel
             df = pd.read_excel(excel_file)
             
-            # 建立照片檔名對映字典 (以檔名主體對應品名或項次)
-            img_dict = {}
+            # 整理照片列表（將檔名與照片資料存入列表）
+            img_list = []
             if image_files:
                 for img in image_files:
-                    base_name = os.path.splitext(img.name)[0]
-                    img_dict[base_name] = img.getvalue()
+                    base_name = os.path.splitext(img.name)[0].strip()
+                    img_list.append({
+                        'name': base_name,
+                        'bytes': img.getvalue()
+                    })
 
-            # 載入 Word 範本
             doc = Document(template_file)
 
-            # 填充班級與日期 (尋找並替換標籤，若有)
+            # 替換段落標籤
             for p in doc.paragraphs:
                 if "課程班級" in p.text:
                     p.text = f"課程班級：{class_name}"
                 if "進貨日期" in p.text:
                     p.text = f"進貨日期：{delivery_date}"
 
-            # 假設表格為文件中的第一個表格
             if len(doc.tables) > 0:
                 table = doc.tables[0]
                 table.alignment = WD_TABLE_ALIGNMENT.CENTER
                 
+                # 若表格除了標題列外已有空白列，將其清理（避免產生第一頁全空白的問題）
+                while len(table.rows) > 1:
+                    # 檢查第二列是否為預留空白列，若是則刪除
+                    row_text = "".join([c.text.strip() for c in table.rows[1].cells])
+                    if row_text == "" or "項次" not in row_text:
+                        # 移除第二列
+                        table._tbl.remove(table.rows[1]._tr)
+                    else:
+                        break
+
+                num_cols = len(table.columns)
+                
                 # 遍歷 Excel 的每一行資料並寫入表格
                 for idx, row in df.iterrows():
-                    # 新增一列
                     row_cells = table.add_row().cells
                     
-                    # 取得資料 (預防欄位名稱差異)
                     item_no = str(row.get('品號', row.get('項次', idx + 1)))
-                    item_name = str(row.get('品名', ''))
-                    item_spec = str(row.get('規格', ''))
+                    item_name = str(row.get('品名', '')).strip()
+                    item_spec = str(row.get('規格', '')).strip()
                     item_qty = f"{row.get('數量', '')} {row.get('單位', '')}".strip()
                     
-                    # 填寫文字欄位
-                    row_cells[0].text = item_no
-                    row_cells[1].text = item_name
-                    row_cells[2].text = item_spec
-                    row_cells[3].text = item_qty
-                    row_cells[5].text = "" # 備註欄保持空白
-                    
-                    # 置中文字
-                    for c in [0, 3]:
-                        for p in row_cells[c].paragraphs:
-                            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    # 寫入各文字欄位
+                    if num_cols >= 1:
+                        row_cells[0].text = str(item_no)
+                        row_cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    if num_cols >= 2:
+                        row_cells[1].text = item_name
+                    if num_cols >= 3:
+                        row_cells[2].text = item_spec
+                    if num_cols >= 4:
+                        row_cells[3].text = item_qty
+                        row_cells[3].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    if num_cols >= 6:
+                        row_cells[5].text = ""  # 備註欄保持空白
 
-                    # 插入照片 (欄位 4)
-                    cell_photo = row_cells[4]
+                    # 插入照片（通常在第 5 欄，即 index 4）
+                    photo_idx = 4 if num_cols >= 5 else (num_cols - 1)
+                    cell_photo = row_cells[photo_idx]
                     p_photo = cell_photo.paragraphs[0]
                     p_photo.alignment = WD_ALIGN_PARAGRAPH.CENTER
                     
-                    # 比對照片檔名
+                    # 增強版照片匹配邏輯（支援：1, 01, 照片1, 序號1, 品名匹配）
                     matching_img = None
-                    for key, img_bytes in img_dict.items():
-                        if key in item_name or str(item_no) in key:
-                            matching_img = img_bytes
+                    idx_str = str(idx + 1)
+                    no_str = str(item_no)
+                    
+                    for img_obj in img_list:
+                        img_name = img_obj['name']
+                        # 匹配條件：檔名包含品名、包含項次數字、或包含品號
+                        if (item_name and item_name in img_name) or \
+                           (no_str and no_str in img_name) or \
+                           (idx_str == img_name or f"照片{idx_str}" in img_name or f"序號{idx_str}" in img_name):
+                            matching_img = img_obj['bytes']
                             break
                     
+                    # 若依然沒配對成功，若照片數量與行數相同，退回按順序配對
+                    if not matching_img and idx < len(img_list):
+                        matching_img = img_list[idx]['bytes']
+
                     if matching_img:
                         image_stream = io.BytesIO(matching_img)
-                        p_photo.add_run().add_picture(image_stream, width=Cm(3.5))
+                        # 限制寬度 3.2cm、高度 2.5cm，防止照片撐爆表格
+                        p_photo.add_run().add_picture(image_stream, width=Cm(3.2), height=Cm(2.5))
                     else:
                         p_photo.text = "（待補照片）"
 
-            # 將結果寫入記憶體中的文件
+            # 導出文件
             doc_io = io.BytesIO()
             doc.save(doc_io)
             doc_io.seek(0)
 
             st.success("🎉 驗收文件產製完成！")
             
-            # 提供下載按鈕
             filename = f"驗收資料_{class_name}_{delivery_date}.docx".replace("/", "")
             st.download_button(
                 label="📥 點此下載驗收文件 (.docx)",
