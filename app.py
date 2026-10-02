@@ -16,7 +16,7 @@ st.markdown("將材料 Excel 明細與照片自動整合填入 Word 範本中，
 st.header("1. 填寫基本資訊")
 col1, col2 = st.columns(2)
 with col1:
-    class_name = st.text_input("課程班級名稱與編號", value="115W0149-飲調輕食暨餐飲創業(桃園)-第1期")
+    class_name = st.text_input("課程班級名稱與編號", value="115W0149-飲調輕食暨餐飲創業(桃園)-第 1 期")
 with col2:
     delivery_date = st.text_input("進貨日期 (YYY/MM/DD)", value="115/02/03")
 
@@ -55,27 +55,42 @@ if st.button("🚀 開始生成驗收文件", type="primary"):
 
             # 替換段落標籤
             for p in doc.paragraphs:
-                if "課程班級" in p.text:
+                if "課程班級" in p.text or "115W0149" in p.text:
                     p.text = f"課程班級：{class_name}"
-                if "進貨日期" in p.text:
+                if "進貨日期" in p.text or "進貨日" in p.text:
                     p.text = f"進貨日期：{delivery_date}"
 
             if len(doc.tables) > 0:
                 table = doc.tables[0]
                 table.alignment = WD_TABLE_ALIGNMENT.CENTER
                 
-                # 若表格除了標題列外已有空白列，將其清理（避免產生第一頁全空白的問題）
+                # 自動判斷標題列各欄位位置
+                hdr_cells = [cell.text.strip() for cell in table.rows[0].cells]
+                
+                # 預設欄位索引
+                idx_no = 0
+                idx_name = 1
+                idx_spec = 2
+                idx_qty = 3
+                idx_photo = 4
+                idx_note = len(hdr_cells) - 1
+                
+                for c_i, c_text in enumerate(hdr_cells):
+                    if "項次" in c_text or "項" in c_text: idx_no = c_i
+                    elif "品名" in c_text: idx_name = c_i
+                    elif "規格" in c_text: idx_spec = c_i
+                    elif "數量" in c_text: idx_qty = c_i
+                    elif "照片" in c_text: idx_photo = c_i
+                    elif "備註" in c_text: idx_note = c_i
+
+                # 清理預設空白列（只留標題列）
                 while len(table.rows) > 1:
-                    # 檢查第二列是否為預留空白列，若是則刪除
                     row_text = "".join([c.text.strip() for c in table.rows[1].cells])
                     if row_text == "" or "項次" not in row_text:
-                        # 移除第二列
                         table._tbl.remove(table.rows[1]._tr)
                     else:
                         break
 
-                num_cols = len(table.columns)
-                
                 # 遍歷 Excel 的每一行資料並寫入表格
                 for idx, row in df.iterrows():
                     row_cells = table.add_row().cells
@@ -86,49 +101,48 @@ if st.button("🚀 開始生成驗收文件", type="primary"):
                     item_qty = f"{row.get('數量', '')} {row.get('單位', '')}".strip()
                     
                     # 寫入各文字欄位
-                    if num_cols >= 1:
-                        row_cells[0].text = str(item_no)
-                        row_cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    if num_cols >= 2:
-                        row_cells[1].text = item_name
-                    if num_cols >= 3:
-                        row_cells[2].text = item_spec
-                    if num_cols >= 4:
-                        row_cells[3].text = item_qty
-                        row_cells[3].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    if num_cols >= 6:
-                        row_cells[5].text = ""  # 備註欄保持空白
+                    if idx_no < len(row_cells):
+                        row_cells[idx_no].text = str(item_no)
+                        row_cells[idx_no].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    if idx_name < len(row_cells):
+                        row_cells[idx_name].text = item_name
+                    if idx_spec < len(row_cells):
+                        row_cells[idx_spec].text = item_spec
+                    if idx_qty < len(row_cells):
+                        row_cells[idx_qty].text = item_qty
+                        row_cells[idx_qty].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    if idx_note < len(row_cells):
+                        row_cells[idx_note].text = ""  # 備註欄保持空白
 
-                    # 插入照片（通常在第 5 欄，即 index 4）
-                    photo_idx = 4 if num_cols >= 5 else (num_cols - 1)
-                    cell_photo = row_cells[photo_idx]
-                    p_photo = cell_photo.paragraphs[0]
-                    p_photo.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    
-                    # 增強版照片匹配邏輯（支援：1, 01, 照片1, 序號1, 品名匹配）
-                    matching_img = None
-                    idx_str = str(idx + 1)
-                    no_str = str(item_no)
-                    
-                    for img_obj in img_list:
-                        img_name = img_obj['name']
-                        # 匹配條件：檔名包含品名、包含項次數字、或包含品號
-                        if (item_name and item_name in img_name) or \
-                           (no_str and no_str in img_name) or \
-                           (idx_str == img_name or f"照片{idx_str}" in img_name or f"序號{idx_str}" in img_name):
-                            matching_img = img_obj['bytes']
-                            break
-                    
-                    # 若依然沒配對成功，若照片數量與行數相同，退回按順序配對
-                    if not matching_img and idx < len(img_list):
-                        matching_img = img_list[idx]['bytes']
+                    # 處理照片欄位
+                    if idx_photo < len(row_cells):
+                        cell_photo = row_cells[idx_photo]
+                        p_photo = cell_photo.paragraphs[0]
+                        p_photo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        
+                        # 匹配照片 logic
+                        matching_img = None
+                        idx_str = str(idx + 1)
+                        no_str = str(item_no)
+                        
+                        for img_obj in img_list:
+                            img_name = img_obj['name']
+                            if (item_name and item_name in img_name) or \
+                               (no_str and no_str in img_name) or \
+                               (idx_str == img_name or f"照片{idx_str}" in img_name or f"序號{idx_str}" in img_name):
+                                matching_img = img_obj['bytes']
+                                break
+                        
+                        # 順序匹配保底
+                        if not matching_img and idx < len(img_list):
+                            matching_img = img_list[idx]['bytes']
 
-                    if matching_img:
-                        image_stream = io.BytesIO(matching_img)
-                        # 限制寬度 3.2cm、高度 2.5cm，防止照片撐爆表格
-                        p_photo.add_run().add_picture(image_stream, width=Cm(3.2), height=Cm(2.5))
-                    else:
-                        p_photo.text = "（待補照片）"
+                        if matching_img:
+                            image_stream = io.BytesIO(matching_img)
+                            # 插入照片，設定合適大小（寬 4.0cm, 高 3.0cm）
+                            p_photo.add_run().add_picture(image_stream, width=Cm(4.0), height=Cm(3.0))
+                        else:
+                            p_photo.text = "（待補照片）"
 
             # 導出文件
             doc_io = io.BytesIO()
