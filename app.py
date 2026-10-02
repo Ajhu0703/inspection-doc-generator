@@ -31,6 +31,20 @@ with col_a:
 with col_b:
     image_files = st.file_uploader("上傳品項照片 (可複選多張照片)", type=["jpg", "png", "jpeg"], accept_multiple_files=True)
 
+# 替換文字的輔助函式（可同時替換一般段落與表格內的文字）
+def replace_text_in_paragraph(p, new_class, new_date):
+    if "115W0149" in p.text or "115W0150" in p.text or "課程班級" in p.text or "飲調輕食" in p.text or "烘焙輕食" in p.text:
+        # 若段落中包含舊的班級關鍵字，更新為新輸入的班級名稱
+        for run in p.runs:
+            if "115W" in run.text or "飲調" in run.text or "烘焙" in run.text or "第" in run.text:
+                run.text = ""
+        p.text = new_class
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    if "進貨日" in p.text or "進貨日期" in p.text:
+        p.text = f"進貨日 {new_date}" if "進貨日 " in p.text else f"進貨日期：{new_date}"
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
 # 3. 核心處理邏輯
 if st.button("🚀 開始生成驗收文件", type="primary"):
     if not excel_file:
@@ -41,7 +55,7 @@ if st.button("🚀 開始生成驗收文件", type="primary"):
         try:
             df = pd.read_excel(excel_file)
             
-            # 整理照片列表（將檔名與照片資料存入列表）
+            # 整理照片列表
             img_list = []
             if image_files:
                 for img in image_files:
@@ -53,14 +67,18 @@ if st.button("🚀 開始生成驗收文件", type="primary"):
 
             doc = Document(template_file)
 
-            # 替換段落標籤
+            # A. 替換一般段落中的班級與日期
             for p in doc.paragraphs:
-                if "課程班級" in p.text or "115W0149" in p.text:
-                    p.text = f"課程班級：{class_name}"
-                if "進貨日期" in p.text or "進貨日" in p.text:
-                    p.text = f"進貨日期：{delivery_date}"
+                replace_text_in_paragraph(p, class_name, delivery_date)
 
-            # 尋找真正包含「品名」或「照片」標題的表格
+            # B. 替換所有表格（包含頂部頁首表格）中的班級與日期
+            for tbl in doc.tables:
+                for row in tbl.rows:
+                    for cell in row.cells:
+                        for p in cell.paragraphs:
+                            replace_text_in_paragraph(p, class_name, delivery_date)
+
+            # C. 尋找主要資料表格（包含「品名」或「照片」標題）
             target_table = None
             for tbl in doc.tables:
                 header_text = "".join([c.text for c in tbl.rows[0].cells])
