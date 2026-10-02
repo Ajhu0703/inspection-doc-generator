@@ -161,7 +161,7 @@ if st.button("🚀 開始生成驗收文件", type="primary"):
 
                         if matching_img:
                             image_stream = io.BytesIO(matching_img)
-                            p_photo.add_run().add_picture(image_stream, width=Cm(4.0), height=Cm(3.0))
+                            p_photo.add_run().add_picture(image_stream, width=Cm(5.5), height=Cm(4.0))
                         else:
                             p_photo.text = "（待補照片）"
             else:
